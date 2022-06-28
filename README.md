@@ -15,14 +15,18 @@ I built an initial prototype using an AdaFruit Arduino Nano Every, which  worked
 ## Powerblock
 The powerblock is fairly simple - routing the 18650 cell to a connector.
 ![Powerblock](https://github.com/yorick-eroyan/lightsaber/blob/main/diagrams/powerblock.png)
+
 I added an inline fuse holder because I don't want to draw more than 2A from the cell.  Each NeoPixel takes about 33.5mA, so at 60/m, with two 1m strips, I have 120 NeoPixels for 4.02A at full draw.  So I will need to limit brightness to about 40% max to give me some breathing room.  Ideally, I will draw less for longer runtime, but we shall see how the brightness goes.
 ## Soundsystem
 The AdaFruit Music Maker Featherwing was appealing to me because it is pin-compatible with the microcontroller, and it has an amplifier.
 ![Soundsystem](https://github.com/yorick-eroyan/lightsaber/blob/main/diagrams/soundsystem.png)
+
 Connection is simple - solder some headers on, and stack on top of the ItsyBitsy.
 ## Gyro
 Any lightsaber worth its plasma needs to react to movement, so I went with the AdaFruit LSM6DSOX.  It came with SparkFun qwiic connectors, making connecting easy.
+
 ![Gyro](https://github.com/yorick-eroyan/lightsaber/blob/main/diagrams/gyro.png)
+
 It is connected to the SCL and SDA pins.  The default address of 0x6A will be used.
 ## NeoPixel and Button
 No pictures here - the NeoPixel control wire is connected to Pin 10 on the ItsyBitsy through a 470Ohm resistor.
