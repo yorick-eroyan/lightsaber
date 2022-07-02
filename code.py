@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
+import alarm
 import time
 import board
 import digitalio
@@ -13,6 +14,7 @@ btn_ctrl = digitalio.DigitalInOut(board.GP13)  # Button input
 btn_ctrl.direction = digitalio.Direction.INPUT
 btn_ctrl.pull = digitalio.Pull.UP
 
+pin_alarm = None
 btn_led = digitalio.DigitalInOut(board.GP11)  # LED on  button
 btn_led.direction = digitalio.Direction.OUTPUT
 
@@ -38,6 +40,12 @@ while True:
             print("Button FALSE")
             if state.cur_state == "On":
                 state.set_state("PowerOff")
+                state.set_state("Off")
+                print("Going to deep sleep")
+                btn_ctrl = None
+                pin_alarm = alarm.pin.PinAlarm(board.GP13, value=False, pull=True)
+                # Exit the program, and then deep sleep until the alarm wakes us.
+                alarm.exit_and_deep_sleep_until_alarms(pin_alarm)
 
     time.sleep(1)
     can_toggle = True

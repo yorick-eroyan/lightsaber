@@ -23,12 +23,12 @@ class StateManager:
         self.cur_state = "Off"  # Always start in Off state
         self.prev_state = "Off"
         self.blade = blade
+        print("Starting State Mgr")
 
     def set_state(self, new_state):
         # verify that new state exists and is valid for the cur_state
         if self.is_valid(new_state):
             # Perform whatever action is needed
-            print(new_state)
             self.prev_state = self.cur_state
             self.cur_state = new_state
             if new_state == "Off":
