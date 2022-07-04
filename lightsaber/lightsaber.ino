@@ -1,6 +1,4 @@
 
-
-
 // Lightsaber
 //
 // Core logic for the EROYAN.tech Lightsaber
@@ -76,48 +74,58 @@
 //  Ideally, get timer going so that have to hold it for 5 seconds to power off.
 // Button progression is only from off->powerdown.
 enum saberState {
-  off,
-  idle,
-  powerup,
-  on,
-  powerdown,
-  blademove,
-  clash
+    off,
+    idle,
+    powerup,
+    on,
+    powerdown,
+    blademove,
+    clash
 };
 
+/*
+ * Global variable section.  This section holds hardware object variables and variables used
+ * for inter-process communication
+ */
 // Blade object.  Controls the NeoPixels
 Adafruit_NeoPixel Blade(NUM_LEDS, CONTROL_PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_LSM6DSOX Sox;
+
 
 // saber State - indicates what state the blade is in
 volatile enum saberState buttonState = off;
 volatile enum saberState nextState = off;
+volatile int initComplete = 0;
 
-
+/*
+ * Configuration section.  This section holds global variables used to hold configuration information
+ * that might be modifiable in the future
+ */
 // Blade color.
 int bladeColor = LED_GREEN;
 
 // Detects the push of a button and moves the state along.
 void buttonPush() {
-  switch (buttonState)
-  {
-    case off:
-      nextState = idle;
-      break;
-    case idle:
-      nextState = powerup;
-      break;
-    case powerup:
-      nextState = on;
-      break;
-    case on:
-      nextState = powerdown;
-      break;
-    case powerdown:
-      nextState = off;
-      break;
-    default:
-      break;
-  }
+    switch (buttonState)
+    {
+        case off:
+            nextState = idle;
+            break;
+        case idle:
+            nextState = powerup;
+            break;
+        case powerup:
+            nextState = on;
+            break;
+        case on:
+            nextState = powerdown;
+            break;
+        case powerdown:
+            nextState = off;
+            break;
+        default:
+            break;
+    }
 }
 
 // This function will accept the state that the blade is moving to, and control the blade
@@ -125,63 +133,63 @@ void buttonPush() {
 // Called in the Loop to keep the interrupt code as lightweight as possible.
 //
 enum saberState changeState(enum saberState evalState) {
-  enum saberState tmpState = evalState;
-  switch (tmpState) {
-    case off:
-      // Blade has already gone through powerdown and is now essentially at idle.
-      // Shut off button led if it is on.
-      digitalWrite(LED_PIN, LOW);
-      //CRITICAL_START
-      Blade.clear();
-      Blade.show();
-      delay(BTN_TIMER);
-      //CRITICAL_STOP
-      break;
-    case idle:
-      // Blade was in 'off'.  Enable the button LED
-      digitalWrite(LED_PIN, HIGH);
-      //CRITICAL_START
-      Blade.clear();
-      Blade.show();
-      delay(BTN_TIMER);
-      //CRITICAL_STOP
-      break;
-    case powerup:
-      // Extend blade  - pause between pixels for LED_SPEED ms
-      //CRITICAL_START
-      for (int i = 0; i < NUM_LEDS; i++) {
-        Blade.setPixelColor(i, bladeColor);
+    enum saberState tmpState = evalState;
+    switch (tmpState) {
+        case off:
+        // Blade has already gone through powerdown and is now essentially at idle.
+        // Shut off button led if it is on.
+        digitalWrite(LED_PIN, LOW);
+        //CRITICAL_START
+        Blade.clear();
         Blade.show();
-        delay(LED_SPEED);
-      }
-      delay(BTN_TIMER);
-      //CRITICAL_STOP
-      tmpState = on; // Auto advance
-      tmpState = changeState(tmpState);  // Recursive call
-      break;
-    case on:
-      break;
-    case powerdown:
-      //CRITICAL_START
-      for (int i = NUM_LEDS-1; i >= 0; --i) {
-        Blade.setPixelColor(i, LED_OFF);
+        delay(BTN_TIMER);
+        //CRITICAL_STOP
+        break;
+        case idle:
+        // Blade was in 'off'.  Enable the button LED
+        digitalWrite(LED_PIN, HIGH);
+        //CRITICAL_START
+        Blade.clear();
         Blade.show();
-        delay(LED_SPEED);
-      }
-      delay(BTN_TIMER);
-      //CRITICAL_STOP
-      tmpState = off;
-      tmpState = changeState(tmpState);  // Recursive call
-      
-      break;
-    case blademove:
-      break;
-    case clash:
-      break;
-    default:
-      break;
-  }
-  return tmpState;
+        delay(BTN_TIMER);
+        //CRITICAL_STOP
+        break;
+        case powerup:
+        // Extend blade  - pause between pixels for LED_SPEED ms
+        //CRITICAL_START
+        for (int i = 0; i < NUM_LEDS; i++) {
+            Blade.setPixelColor(i, bladeColor);
+            Blade.show();
+            delay(LED_SPEED);
+        }
+        delay(BTN_TIMER);
+        //CRITICAL_STOP
+        tmpState = on; // Auto advance
+        tmpState = changeState(tmpState);  // Recursive call
+        break;
+        case on:
+        break;
+        case powerdown:
+        //CRITICAL_START
+        for (int i = NUM_LEDS-1; i >= 0; --i) {
+            Blade.setPixelColor(i, LED_OFF);
+            Blade.show();
+            delay(LED_SPEED);
+        }
+        delay(BTN_TIMER);
+        //CRITICAL_STOP
+        tmpState = off;
+        tmpState = changeState(tmpState);  // Recursive call
+          
+        break;
+        case blademove:
+        break;
+        case clash:
+        break;
+        default:
+        break;
+    }
+    return tmpState;
 }
 
 // TEST CODE
@@ -190,30 +198,45 @@ int led = LED_BUILTIN;
 
 // Initial setup.  Initialize blade, configure pins, set up interrupt and set the brightness to manage power usage.
 void setup() {
-  Serial.println("Lightsaber Initialization Starting");
-  Blade.begin();  // Initialize neopixel library
-  pinMode(BUTTON_PIN, INPUT_PULLUP); // Button controller - this is the interrupt pin
-  pinMode(LED_PIN, OUTPUT);
-  // Add interrupt handler
-  attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), buttonPush, RISING);
+    Serial.begin(115200);
+    while (!Serial) {
+        delay(10); // will pause Zero, Leonardo, etc until serial console opens
+    }
 
-  // Make sure blade is in state OFF
-  buttonState = changeState(off);
+    Serial.println("Lightsaber Initialization Starting");
+    initComplete = 1;
+    Blade.begin();  // Initialize neopixel library
+    pinMode(BUTTON_PIN, INPUT_PULLUP); // Button controller - this is the interrupt pin
+    pinMode(LED_PIN, OUTPUT);
+    // Add interrupt handler
+    attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), buttonPush, RISING);
 
-  Blade.setBrightness(LED_BRIGHTNESS);
-  Serial.println("Lightsaber Initialization Complete");
+    // Make sure blade is in state OFF
+    buttonState = changeState(off);
+
+    Blade.setBrightness(LED_BRIGHTNESS);
+    Serial.println("Lightsaber Initialization Complete");
 
 }
 
 // Main loop - based on mode, do something here.
 void loop() {
-  // put your main code here, to run repeatedly:
-  if (nextState != buttonState) {
-    buttonState = changeState(nextState);
-  }
+    // put your main code here, to run repeatedly:
+    if (nextState != buttonState) {
+        buttonState = changeState(nextState);
+    }
 
 }
 
-  // TEST CODE
-  //analogWrite(led, 240);
-  // END TEST CODE
+/*
+ * Setup1 and Loop1 are for the 2nd core.  This will manage the accellerometer
+ */
+void setup1() {
+    while (!initComplete) {
+        delay(10); // will pause Zero, Leonardo, etc until serial console opens
+    }
+  
+    Serial.println("Setup1 Initializing Starting");
+    analogWrite(led, 240);
+    Serial.println("Setup1 Initializing Complete");
+}
