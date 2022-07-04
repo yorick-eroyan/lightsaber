@@ -78,19 +78,7 @@ Adafruit_NeoPixel Blade(NUM_LEDS, CONTROL_PIN, NEO_GRB + NEO_KHZ800);
 // saber State - indicates what state the blade is in
 volatile enum saberState buttonState = off;
 volatile enum saberState nextState = off;
-// TEST CODE
-volatile int toggle = 0;
-void togglebutton() {
-    if (toggle == 0) {
-        toggle = 1;
-        digitalWrite(LED_PIN, HIGH);
-    }
-    else {
-        toggle = 0;
-        digitalWrite(LED_PIN, LOW);
-    }
-}
-// END TEST CODE
+
 
 // Blade color.
 int bladeColor = LED_GREEN;
@@ -123,52 +111,55 @@ void buttonPush() {
 // and sound accordingly.
 // Called in the Loop to keep the interrupt code as lightweight as possible.
 //
-enum saberState changeState(enum saberState nextState) {
-  buttonState = nextState;
-  switch (nextState) {
+enum saberState changeState(enum saberState evalState) {
+  enum saberState tmpState = evalState;
+  switch (tmpState) {
     case off:
       // Blade has already gone through powerdown and is now essentially at idle.
       // Shut off button led if it is on.
       digitalWrite(LED_PIN, LOW);
-      CRITICAL_START
+      //CRITICAL_START
       Blade.clear();
       Blade.show();
       delay(BTN_TIMER);
-      CRITICAL_STOP
+      //CRITICAL_STOP
       break;
     case idle:
       // Blade was in 'off'.  Enable the button LED
       digitalWrite(LED_PIN, HIGH);
-      CRITICAL_START
+      //CRITICAL_START
       Blade.clear();
       Blade.show();
       delay(BTN_TIMER);
-      CRITICAL_STOP
+      //CRITICAL_STOP
       break;
     case powerup:
       // Extend blade  - pause between pixels for LED_SPEED ms
-      CRITICAL_START
+      //CRITICAL_START
       for (int i = 0; i < NUM_LEDS; i++) {
         Blade.setPixelColor(i, bladeColor);
         Blade.show();
         delay(LED_SPEED);
       }
       delay(BTN_TIMER);
-      CRITICAL_STOP
-      nextState = on; // Auto advance
+      //CRITICAL_STOP
+      tmpState = on; // Auto advance
+      tmpState = changeState(tmpState);  // Recursive call
       break;
     case on:
       break;
     case powerdown:
-      CRITICAL_START
+      //CRITICAL_START
       for (int i = NUM_LEDS-1; i >= 0; --i) {
         Blade.setPixelColor(i, LED_OFF);
         Blade.show();
         delay(LED_SPEED);
-        nextState = off; // Auto advance
       }
       delay(BTN_TIMER);
-      CRITICAL_STOP
+      //CRITICAL_STOP
+      tmpState = off;
+      tmpState = changeState(tmpState);  // Recursive call
+      
       break;
     case blademove:
       break;
@@ -177,7 +168,7 @@ enum saberState changeState(enum saberState nextState) {
     default:
       break;
   }
-  return nextState;
+  return tmpState;
 }
 
 // TEST CODE
@@ -189,11 +180,11 @@ void setup() {
   Blade.begin();  // Initialize neopixel library
   pinMode(BUTTON_PIN, INPUT_PULLUP); // Button controller - this is the interrupt pin
   pinMode(LED_PIN, OUTPUT);
-  //attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), buttonPush, RISING);
-  // TEST CODE
-  attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), togglebutton, RISING);
-  // END TEST CODE
-  //changeState(off);
+  // Add interrupt handler
+  attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), buttonPush, RISING);
+
+  // Make sure blade is in state OFF
+  buttonState = changeState(off);
   // TEST CODE
   analogWrite(led, 240);
   // END TEST CODE
@@ -204,20 +195,8 @@ void setup() {
 // Main loop - based on mode, do something here.
 void loop() {
   // put your main code here, to run repeatedly:
-  //if (nextState != buttonState) {
-    //nextState = changeState(nextState);
-  //}
-  analogWrite(led, 240);
-  for (int i = 0; i < NUM_LEDS; i++) {
-    Blade.setPixelColor(i, bladeColor);
-    Blade.show();
-    delay(LED_SPEED);
+  if (nextState != buttonState) {
+    buttonState = changeState(nextState);
   }
-  delay(500);
-  analogWrite(led, 0);
-        Blade.clear();
-      Blade.show();
-  delay(500);
-
 
 }
