@@ -1,3 +1,6 @@
+
+
+
 // Lightsaber
 //
 // Core logic for the EROYAN.tech Lightsaber
@@ -19,6 +22,12 @@
 #ifdef __AVR__
 #include <avr/power.h> // Required for 16 MHz Adafruit Trinket
 #endif
+#include <Adafruit_LSM6DSOX.h>
+// #include <Adafruit_LSM6DSO32.h>
+#include <Adafruit_I2CDevice.h>
+#include <Adafruit_I2CRegister.h>
+#include <Adafruit_SPIDevice.h>
+#include <Adafruit_BusIO_Register.h>
 
 // DEFINES
 // This section defines the constants needed for the lightsaber
@@ -30,6 +39,10 @@
 #define LED_BRIGHTNESS  85            // Brightness - in a range of 0-255, so 85 is about 1/3
 #define BTN_TIMER       1000          // number of milliseconds to delay after a button is hit before interrupts are re-enabled.  
 #define LED_SPEED       100           // Time in ms between led's when extending or retracting
+// I2C Section
+#define SCL0            17            // Will be used for Accel/Gyro
+#define SDA0            16            // Will be used for Accel/Gyro
+#define GYRO_ADDR       0x6A          // Address of Accel/Gyro LSM6DSOX
 
 #define CRITICAL_START  noInterrupts(); // Disable interrupts for critical section - i.e. changing pixelse
 #define CRITICAL_STOP   interrupts();   // re-enable interrupts
@@ -177,6 +190,7 @@ int led = LED_BUILTIN;
 
 // Initial setup.  Initialize blade, configure pins, set up interrupt and set the brightness to manage power usage.
 void setup() {
+  Serial.println("Lightsaber Initialization Starting");
   Blade.begin();  // Initialize neopixel library
   pinMode(BUTTON_PIN, INPUT_PULLUP); // Button controller - this is the interrupt pin
   pinMode(LED_PIN, OUTPUT);
@@ -185,10 +199,9 @@ void setup() {
 
   // Make sure blade is in state OFF
   buttonState = changeState(off);
-  // TEST CODE
-  analogWrite(led, 240);
-  // END TEST CODE
+
   Blade.setBrightness(LED_BRIGHTNESS);
+  Serial.println("Lightsaber Initialization Complete");
 
 }
 
@@ -200,3 +213,7 @@ void loop() {
   }
 
 }
+
+  // TEST CODE
+  //analogWrite(led, 240);
+  // END TEST CODE
