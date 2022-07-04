@@ -293,17 +293,17 @@ void loop1() {
         sensors_event_t temp;
         sox.getEvent(&accel, &gyro, &temp);
 
-        Serial.print("\t\tTemperature ");
-        Serial.print(temp.temperature);
-        Serial.println(" deg C");
-
-        Serial.print("\t\tAccel X: ");
-        Serial.print(accel.acceleration.x);
-        Serial.print(" \tY: ");
-        Serial.print(accel.acceleration.y);
-        Serial.print(" \tZ: ");
-        Serial.print(accel.acceleration.z);
-        Serial.println(" m/s^2 ");
+        Serial.print("\t\tVector\t");
+        float vector = accel.acceleration.x * accel.acceleration.y * accel.acceleration.z;
+        Serial.println (vector);
+        if (vector < 0) {
+            vector = vector * -1;
+        }
+        if (vector > 250) {
+            vector = 250;
+        }
+        int v_int = (int)vector;
+        analogWrite(led, v_int);
         delay(100);
     }
 }
