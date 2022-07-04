@@ -89,7 +89,8 @@ enum saberState {
  */
 // Blade object.  Controls the NeoPixels
 Adafruit_NeoPixel Blade(NUM_LEDS, CONTROL_PIN, NEO_GRB + NEO_KHZ800);
-Adafruit_LSM6DSOX Sox;
+Adafruit_LSM6DSOX sox;
+int led = LED_BUILTIN;
 
 
 // saber State - indicates what state the blade is in
@@ -192,9 +193,8 @@ enum saberState changeState(enum saberState evalState) {
     return tmpState;
 }
 
-// TEST CODE
-int led = LED_BUILTIN;
-// END TEST CODE
+
+
 
 // Initial setup.  Initialize blade, configure pins, set up interrupt and set the brightness to manage power usage.
 void setup() {
@@ -232,11 +232,78 @@ void loop() {
  * Setup1 and Loop1 are for the 2nd core.  This will manage the accellerometer
  */
 void setup1() {
+    
     while (!initComplete) {
         delay(10); // will pause Zero, Leonardo, etc until serial console opens
     }
-  
     Serial.println("Setup1 Initializing Starting");
     analogWrite(led, 240);
+    // Now try to initialize gyro
+    if (!sox.begin_I2C()) {
+        delay(50);
+    }
+    Serial.print("Accelerometer range set to: ");
+    switch (sox.getAccelRange()) {
+        case LSM6DS_ACCEL_RANGE_2_G:
+            Serial.println("+-2G");
+            break;
+        case LSM6DS_ACCEL_RANGE_4_G:
+            Serial.println("+-4G");
+            break;
+        case LSM6DS_ACCEL_RANGE_8_G:
+            Serial.println("+-8G");
+            break;
+        case LSM6DS_ACCEL_RANGE_16_G:
+            Serial.println("+-16G");
+            break;
+        default:
+            Serial.println("Error");
+    }
+    sox.setGyroRange(LSM6DS_GYRO_RANGE_250_DPS );
+    Serial.print("Gyro range set to: ");
+    switch (sox.getGyroRange()) {
+        case LSM6DS_GYRO_RANGE_125_DPS:
+            Serial.println("125 degrees/s");
+            break;
+        case LSM6DS_GYRO_RANGE_250_DPS:
+            Serial.println("250 degrees/s");
+            break;
+        case LSM6DS_GYRO_RANGE_500_DPS:
+            Serial.println("500 degrees/s");
+            break;
+        case LSM6DS_GYRO_RANGE_1000_DPS:
+            Serial.println("1000 degrees/s");
+            break;
+        case LSM6DS_GYRO_RANGE_2000_DPS:
+            Serial.println("2000 degrees/s");
+            break;
+        case ISM330DHCX_GYRO_RANGE_4000_DPS:
+            break; // unsupported range for the DSOX
+        default:
+            Serial.println("Error");        
+    }
+
     Serial.println("Setup1 Initializing Complete");
+}
+
+void loop1() {
+    if (buttonState != off) {
+        sensors_event_t accel;
+        sensors_event_t gyro;
+        sensors_event_t temp;
+        sox.getEvent(&accel, &gyro, &temp);
+
+        Serial.print("\t\tTemperature ");
+        Serial.print(temp.temperature);
+        Serial.println(" deg C");
+
+        Serial.print("\t\tAccel X: ");
+        Serial.print(accel.acceleration.x);
+        Serial.print(" \tY: ");
+        Serial.print(accel.acceleration.y);
+        Serial.print(" \tZ: ");
+        Serial.print(accel.acceleration.z);
+        Serial.println(" m/s^2 ");
+        delay(100);
+    }
 }
