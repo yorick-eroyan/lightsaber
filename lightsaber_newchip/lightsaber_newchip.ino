@@ -40,6 +40,8 @@
 #define LED_PIN         11            // Pin used to power the LED on the button - D11/GPIO11
 #define LED_BRIGHTNESS  85            // Brightness - in a range of 0-255, so 85 is about 1/3
 #define BTN_TIMER       1000          // number of milliseconds to delay after a button is hit before interrupts are re-enabled.  
+#define READY_DELAY     1000          // Number of milliseconds to delay when in Off/Ready state before a sync check.
+#define POLL_DELAY      100           // Number of milliseconds to delay when in any state other than Off/Ready
 #define LED_SPEED       100           // Time in ms between led's when extending or retracting
 // I2C Section
 #define GYRO_ADDR       0x6A          // Address of Accel/Gyro LSM6DSOX
@@ -50,8 +52,14 @@
 #define CARDCS          7             // Card chip select pin
 #define VS1053_DREQ     9             // VS1053 Data request, ideally an Interrupt pin
 
-#define CRITICAL_START  noInterrupts(); // Disable interrupts for critical section - i.e. changing pixelse
-#define CRITICAL_STOP   interrupts();   // re-enable interrupts
+// Here we set the critical section if we can.
+#ifndef BLOCK_INTERRUPTS
+    #define CRITICAL_START 
+    #define CRITICAL_STOP
+#else
+    #define CRITICAL_START  noInterrupts(); // Disable interrupts for critical section - i.e. changing pixelse
+    #define CRITICAL_STOP   interrupts();   // re-enable interrupts
+#endif
 /*
  * Colors are 32-bit number defined in four bytes - 0xWWRRGGBB  Code uses bit-shifting to determine it.
  * Examples are:
@@ -77,20 +85,23 @@
 
 // Defines the state of the lightsaber.  
 //  Starts in Off. 
-//  One button push moves to Idle (enabling the button LED).
+//  One button push moves to ready (enabling the button LED).
 //  Second button push moves to powerup, which engages the lightsaber sound and extends the blade
 //    Automatically moves to "on" when complete.
 //  Clash is set when impact is felt.  Only triggers if it is in "on" state and returns to "on" when complete\
-//  Next button push goes to powerdown, which engages the power off sound & blade controls, then goes to Idle
+//  Next button push goes to powerdown, which engages the power off sound & blade controls, then goes to ready
 //  Ideally, get timer going so that have to hold it for 5 seconds to power off.
 // Button progression is only from off->powerdown.
 enum saberState {
     off,
-    idle,
+    coreboot,
+    procboot,
+    isready,
     powerup,
     on,
     powerdown,
-    blademove,
+    blademove, // Sublogic will determine speed, and whether it's spinning, which is a good trick.
+    bladeclash,
     clash
 };
 
@@ -124,6 +135,11 @@ int led = LED_BUILTIN;
 
 
 // saber State - indicates what state the blade is in
+volatile enum saberState currentState = off;
+volatile enum saberState priorState = off;
+volatile enum saberState procZeroState = off;
+volatile enum saberState procOneState = off;
+
 volatile enum saberState buttonState = off;
 volatile enum saberState nextState = off;
 volatile int initComplete = 0;
@@ -145,9 +161,9 @@ void buttonPush() {
     switch (buttonState)
     {
         case off:
-            nextState = idle;
+            nextState = isready;
             break;
-        case idle:
+        case isready:
             nextState = powerup;
             break;
         case powerup:
@@ -164,64 +180,86 @@ void buttonPush() {
     }
 }
 
+/*
+ * This function will coordinate each thread's states and return once core1 is ready.  
+ */
+void syncState(int core, enum saberState syncState) {
+
+    if (core == 0) {
+        // Set core1 state to syncState
+        procOneState = syncState;
+        delay(POLL_DELAY);
+        while(procZeroState != syncState) {
+            delay(POLL_DELAY);
+        }
+    }
+    else { // This must be core 1 and it must be called at the END of the state function.
+        procZeroState = syncState;
+    }
+    return;
+}
 // This function will accept the state that the blade is moving to, and control the blade
 // and sound accordingly.
 // Called in the Loop to keep the interrupt code as lightweight as possible.
 //
-enum saberState changeState(enum saberState evalState) {
+// TAG TODO - Replace with a light-only state machine, then add a sound-only state machine for the other processor
+
+enum saberState changeBladeState(enum saberState evalState) {
     enum saberState tmpState = evalState;
-    Serial.print("changeState: ");
+    if (evalState == currentState) {
+        return(currentState); // If they pass in same state, just exit.
+    }
+    syncState(0, evalState); // Make sure both threads are sync'd.
+    Serial.print("changeBladeState: ");
     Serial.println(evalState);
     switch (tmpState) {
         case off:
-            // Blade has already gone through powerdown and is now essentially at idle.
+            // Blade has already gone through powerdown and is now essentially at ready.
             // Shut off button led if it is on.
             digitalWrite(LED_PIN, LOW);
-            //CRITICAL_START
-            Blade.clear();
-            Blade.show();
-            playSound(ssoff);
-            delay(BTN_TIMER);
-            //CRITICAL_STOP
+            CRITICAL_START
+              Blade.clear();
+              Blade.show();
+            CRITICAL_STOP
             break;
-            case idle:
+            case isready:
             // Blade was in 'off'.  Enable the button LED
             digitalWrite(LED_PIN, HIGH);
-            //CRITICAL_START
-            Blade.clear();
-            Blade.show();
-            delay(BTN_TIMER);
-            //CRITICAL_STOP
+            CRITICAL_START
+              Blade.clear();
+              Blade.show();
+              delay(BTN_TIMER);
+            CRITICAL_STOP
             break;
         case powerup:
             // Extend blade  - pause between pixels for LED_SPEED ms
-            //CRITICAL_START
-            playSound(sspowerup);
-            for (int i = 0; i < NUM_LEDS; i++) {
-                Blade.setPixelColor(i, bladeColor);
-                Blade.show();
-                delay((int)(2000/NUM_LEDS));
-            }
-            delay(BTN_TIMER);
-            //CRITICAL_STOP
+            CRITICAL_START
+              playSound(sspowerup);
+              for (int i = 0; i < NUM_LEDS; i++) {
+                  Blade.setPixelColor(i, bladeColor);
+                  Blade.show();
+                  delay((int)(2000/NUM_LEDS));
+              }
+              delay(BTN_TIMER);
+            CRITICAL_STOP
             tmpState = on; // Auto advance
-            tmpState = changeState(tmpState);  // Recursive call
+            tmpState = changeBladeState(tmpState);  // Recursive call
             break;
         case on:
             playSound(sshum);
             break;
         case powerdown:
-            //CRITICAL_START
-            playSound(sspowerdown);
-            for (int i = NUM_LEDS-1; i >= 0; --i) {
-                Blade.setPixelColor(i, LED_OFF);
-                Blade.show();
-                delay((int)(2000/NUM_LEDS));
-            }
-            delay(BTN_TIMER);
-            //CRITICAL_STOP
+            CRITICAL_START
+              playSound(sspowerdown);
+              for (int i = NUM_LEDS-1; i >= 0; --i) {
+                  Blade.setPixelColor(i, LED_OFF);
+                  Blade.show();
+                  delay((int)(2000/NUM_LEDS));
+              }
+              delay(BTN_TIMER);
+            CRITICAL_STOP
             tmpState = off;
-            tmpState = changeState(tmpState);  // Recursive call
+            tmpState = changeBladeState(tmpState);  // Recursive call
           
             break;
         case blademove:
@@ -293,89 +331,75 @@ void playSound(enum soundState sound) {
     }
 }
 
-
-// Initial setup.  Initialize blade, configure pins, set up interrupt and set the brightness to manage power usage.
+/* 
+ *  Core 0 setup
+ *  Core 0 is the master.  It starts with current State = off, procZeroState = off, procOneState = off.
+ *  Pseudocode
+ *  Set procZeroState to coreboot
+ *  Initialize serial port
+ *  Set procZeroState to procboot
+ *  Initialize neopixels
+ *  Set procZeroState to Ready
+ *  Loop until ProcOneState is Ready
+ *  Set currentState to ready
+ *  Initial setup.  Initialize blade, configure pins, set up interrupt and set the brightness to manage power usage.
+ *  
+ */
 void setup() {
+  
+    priorState == off;
+    procZeroState = coreboot;
     Serial.begin(115200);
     while (!Serial) {
         delay(10); // will pause Zero, Leonardo, etc until serial console opens
     }
 
-    Serial.println("Lightsaber Initialization Starting");
-    
+    procZeroState = procboot;
+    Serial.println("Core 0 Initialization Starting");
+    Serial.println("Core 0: Initializing neopixel library");
     Blade.begin();  // Initialize neopixel library
     pinMode(BUTTON_PIN, INPUT_PULLUP); // Button controller - this is the interrupt pin
     pinMode(LED_PIN, OUTPUT);
     
     Blade.setBrightness(LED_BRIGHTNESS);
-
-    // Initialize sound
-    if (! musicPlayer.begin()) { // initialise the music player
-        Serial.println(F("Couldn't find VS1053, do you have the right pins defined?"));
-        while (1);
-    }
-    Serial.println("Initializing Soundsystem");
-    musicPlayer.setVolume(SOUND_VOL,SOUND_VOL);
-    musicPlayer.useInterrupt(VS1053_FILEPLAYER_PIN_INT);
-    if (!SD.begin(CARDCS)) {
-        Serial.println(F("SD failed, or not present"));
-        while (1);  // don't do anything more
-  }
-  Serial.println("SD OK!");
-  musicPlayer.sineTest(0x44, 500);    // Make a tone to indicate VS1053 is working
-  // Make sure blade is in state OFF
-  // Add interrupt handler
-  attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), buttonPush, RISING);
-  initComplete = 1;
-  buttonState = changeState(off);
-  Serial.println("Lightsaber Initialization Complete");
-
-}
-
-// Main loop - based on mode, do something here.
-void loop() {
-    // put your main code here, to run repeatedly:
-
-    if (nextState != buttonState) {
-        buttonState = changeState(nextState);
-    }
+    Serial.println("Core 0: Initializing interrupt handler");
+    // Add interrupt handler
+    attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), buttonPush, RISING);
+  
+    Serial.println("Core 0: Waiting for core 1");
     
-    // Start with the basics.  Get the board LED to blink
-    /*
-    Serial.println("Trying to turn led on");
-    analogWrite(led, 100);
-    delay(500);
-    Serial.println("Trying to turn led off");
-    analogWrite(led, 0);
-    delay(500);
-    Serial.println("Setting to idle");
-    buttonState = changeState(idle);
-    delay(1000);
-    Serial.println("Powering up");
-    buttonState = changeState(powerup);
-    delay(1000);
-    Serial.println("Powering down");
-    buttonState = changeState(powerdown);
-    delay(1000);
-    */
-
+    while(procOneState != isready)
+    {
+      delay(100);
+    }
+    procZeroState = isready;
+    // Now that procOne is ready, set overall state to ready.
+    currentState = isready;
 
 }
 
 /*
- * Setup1 and Loop1 are for the 2nd core.  This will manage the accellerometer
+ * Core 1 Initialization
+ * Pseudocode
+ * Wait for Core 0 to go to procboot state
+ * Initialize Gyro
+ * Initialize Sound
+ * Flag Core 1 as Ready
  */
 void setup1() {
     
-    while (!initComplete) {
-        delay(10); // will pause Zero, Leonardo, etc until serial console opens
+    while (procZeroState != procboot) {
+        delay(100); // will pause until core 0 starts its actual setup
     }
-    Serial.println("Setup1 Initializing Starting");
+    Serial.println("Core 1 Initializing Starting");
+    procOneState = procboot;
+    Serial.println("Core 1: Initializing Gyro");
     analogWrite(led, 240);
     // Now try to initialize gyro
     if (!sox.begin_I2C(GYRO_ADDR, &Wire1, 0)) {
         delay(50);
     }
+    Serial.println("Core 1: Testing Gyro");
     Serial.print("Accelerometer range set to: ");
     switch (sox.getAccelRange()) {
         case LSM6DS_ACCEL_RANGE_2_G:
@@ -415,10 +439,75 @@ void setup1() {
             break; // unsupported range for the DSOX
         default:
             Serial.println("Error");        
+      }
+    Serial.println("Core 1: Initializing Sound");
+    // Initialize sound
+    if (! musicPlayer.begin()) { // initialise the music player
+      Serial.println(F("Couldn't find VS1053, do you have the right pins defined?"));
+      while (1);
     }
-
-    Serial.println("Setup1 Initializing Complete");
+    Serial.println("Initializing Soundsystem");
+    musicPlayer.setVolume(SOUND_VOL,SOUND_VOL);
+    musicPlayer.useInterrupt(VS1053_FILEPLAYER_PIN_INT);
+    Serial.println("Core 1: Initializing SD Card");
+    if (!SD.begin(CARDCS)) {
+        Serial.println(F("SD failed, or not present"));
+        while (1);  // don't do anything more
+    }
+    Serial.println("Core 1: SD Card Initialization Complete");
+    Serial.println("Core 1: Testing Sound");
+    musicPlayer.sineTest(0x44, 500);    // Make a tone to indicate VS1053 is working
+    // Make sure blade is in state OFF
+    Serial.println(" Core 1: Initialization complete");
+    procOneState = isready;
 }
+
+/*
+ * Core 0 Loop
+ * 
+ * Core 0 is the master, and manages the neopixel blade (only).
+ * It monitors for state change, then does a sync, then intializes the sync state.
+ * Currently operates on defined delay period defined by the following DEFINES
+ * READY_DELAY     - Number of milliseconds to delay when in Off/Ready state before a sync check.
+ * POLL_DELAY      - Number of milliseconds to delay when in any state other than Off/Ready.
+ * 
+ * Pseudocode
+ * If currentState == Off Delay for READY_DELAY
+ * if currentState == Ready and prev state == Off, turn on button LED
+ * 
+ */
+void loop() {
+    // put your main code here, to run repeatedly:
+
+    // If the priorState is OFF, the only valid options are off and isReady.  Everything else is invalid and will result in a call to POWEROFF
+    currentState = changeBladeState(nextState);
+    delay(POLL_DELAY);
+
+
+    // Start with the basics.  Get the board LED to blink
+    /*
+     * TAG TODO REMOVE THIS CODE.
+    Serial.println("Trying to turn led on");
+    analogWrite(led, 100);
+    delay(500);
+    Serial.println("Trying to turn led off");
+    analogWrite(led, 0);
+    delay(500);
+    Serial.println("Setting to ready");
+    buttonState = changeState(ready);
+    delay(1000);
+    Serial.println("Powering up");
+    buttonState = changeState(powerup);
+    delay(1000);
+    Serial.println("Powering down");
+    buttonState = changeState(powerdown);
+    delay(1000);
+    */
+
+
+}
+
+
 
 void loop1() {
     if (buttonState != off) {
