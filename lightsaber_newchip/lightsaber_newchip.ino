@@ -97,6 +97,7 @@ enum saberState {
     coreboot,
     procboot,
     isready,
+    idle,
     powerup,
     on,
     powerdown,
@@ -158,22 +159,31 @@ int bladeColor = LED_GREEN;
 // Detects the push of a button and moves the state along.
 void buttonPush() {
     Serial.println("Button Push Detected");
-    switch (buttonState)
+    switch (currentState)
     {
         case off:
             nextState = isready;
+            Serial.println(" Next State = isready");
             break;
         case isready:
+            nextState = idle;
+            Serial.println(" Next State = idle");
+            break;
+        case idle:
             nextState = powerup;
+            Serial.println(" Next State = powerup");
             break;
         case powerup:
             nextState = on;
+            Serial.println(" Next State = on");
             break;
         case on:
             nextState = powerdown;
+            Serial.println(" Next State = powerdown");
             break;
         case powerdown:
             nextState = off;
+            Serial.println(" Next State = off");
             break;
         default:
             break;
@@ -185,17 +195,24 @@ void buttonPush() {
  */
 void syncState(int core, enum saberState syncState) {
 
+    if (syncState == procZeroState) {
+        // No need to sync - already sync'd
+        return;
+    }
     if (core == 0) {
         // Set core1 state to syncState
         procOneState = syncState;
         delay(POLL_DELAY);
         while(procZeroState != syncState) {
             delay(POLL_DELAY);
+            Serial.print(".");
         }
+        Serial.println(" ");
     }
     else { // This must be core 1 and it must be called at the END of the state function.
         procZeroState = syncState;
     }
+    
     return;
 }
 // This function will accept the state that the blade is moving to, and control the blade
@@ -207,13 +224,15 @@ void syncState(int core, enum saberState syncState) {
 enum saberState changeBladeState(enum saberState evalState) {
     enum saberState tmpState = evalState;
     if (evalState == currentState) {
+        Serial.println("changeBladeState: Matching states.  Leaving");
         return(currentState); // If they pass in same state, just exit.
     }
-    syncState(0, evalState); // Make sure both threads are sync'd.
+    syncState(0, tmpState); // Make sure both threads are sync'd.
     Serial.print("changeBladeState: ");
     Serial.println(evalState);
     switch (tmpState) {
         case off:
+        case isready:  // Both off and isready are really the same thing for now
             // Blade has already gone through powerdown and is now essentially at ready.
             // Shut off button led if it is on.
             digitalWrite(LED_PIN, LOW);
@@ -222,7 +241,7 @@ enum saberState changeBladeState(enum saberState evalState) {
               Blade.show();
             CRITICAL_STOP
             break;
-            case isready:
+        case idle:
             // Blade was in 'off'.  Enable the button LED
             digitalWrite(LED_PIN, HIGH);
             CRITICAL_START
@@ -234,7 +253,6 @@ enum saberState changeBladeState(enum saberState evalState) {
         case powerup:
             // Extend blade  - pause between pixels for LED_SPEED ms
             CRITICAL_START
-              playSound(sspowerup);
               for (int i = 0; i < NUM_LEDS; i++) {
                   Blade.setPixelColor(i, bladeColor);
                   Blade.show();
@@ -246,11 +264,11 @@ enum saberState changeBladeState(enum saberState evalState) {
             tmpState = changeBladeState(tmpState);  // Recursive call
             break;
         case on:
-            playSound(sshum);
+            
             break;
         case powerdown:
             CRITICAL_START
-              playSound(sspowerdown);
+              
               for (int i = NUM_LEDS-1; i >= 0; --i) {
                   Blade.setPixelColor(i, LED_OFF);
                   Blade.show();
@@ -374,6 +392,7 @@ void setup() {
     }
     procZeroState = isready;
     // Now that procOne is ready, set overall state to ready.
+    Serial.println("Core 0:  Setup complete.  Ready to Rock and Roll.");
     currentState = isready;
 
 }
@@ -479,37 +498,25 @@ void setup1() {
 void loop() {
     // put your main code here, to run repeatedly:
 
-    // If the priorState is OFF, the only valid options are off and isReady.  Everything else is invalid and will result in a call to POWEROFF
-    currentState = changeBladeState(nextState);
-    delay(POLL_DELAY);
-
-
-    // Start with the basics.  Get the board LED to blink
-    /*
-     * TAG TODO REMOVE THIS CODE.
-    Serial.println("Trying to turn led on");
-    analogWrite(led, 100);
-    delay(500);
-    Serial.println("Trying to turn led off");
-    analogWrite(led, 0);
-    delay(500);
-    Serial.println("Setting to ready");
-    buttonState = changeState(ready);
-    delay(1000);
-    Serial.println("Powering up");
-    buttonState = changeState(powerup);
-    delay(1000);
-    Serial.println("Powering down");
-    buttonState = changeState(powerdown);
-    delay(1000);
-    */
-
+    while(1) {
+        // If the priorState is OFF, the only valid options are off and isReady.  Everything else is invalid and will result in a call to POWEROFF
+        currentState = changeBladeState(nextState);
+        if (currentState == off) {
+            delay(READY_DELAY);
+        }
+        else {
+            delay(POLL_DELAY);
+        }
+    }
 
 }
 
 
-
+/*
+ * This loop will manage the sound aspect of the lightsaber.  
+ */
 void loop1() {
+    /*
     if (buttonState != off) {
         sensors_event_t accel;
         sensors_event_t gyro;
@@ -537,7 +544,8 @@ void loop1() {
             playSound(currSoundState); // Continue playing sound
         }
     }
-    
+    */
+    syncState(1, procOneState); 
 }
 /*
 */
