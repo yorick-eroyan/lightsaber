@@ -93,17 +93,17 @@
 //  Ideally, get timer going so that have to hold it for 5 seconds to power off.
 // Button progression is only from off->powerdown.
 enum saberState {
-    off,
-    coreboot,
-    procboot,
-    isready,
-    idle,
-    powerup,
-    on,
-    powerdown,
-    blademove, // Sublogic will determine speed, and whether it's spinning, which is a good trick.
-    bladeclash,
-    clash
+    off,  // 0
+    coreboot, // 1
+    procboot, // 2
+    isready, // 3
+    idle, // 4
+    powerup, // 5
+    on, // 6
+    powerdown, // 7 
+    blademove, // 8 Sublogic will determine speed, and whether it's spinning, which is a good trick.
+    bladeclash, // 9
+    clash // 10
 };
 
 enum soundState {
@@ -182,10 +182,12 @@ void buttonPush() {
             Serial.println(" Next State = powerdown");
             break;
         case powerdown:
-            nextState = off;
+            nextState = idle;
             Serial.println(" Next State = off");
             break;
         default:
+            nextState = currentState;
+            Serial.println(" Next State = currentState");
             break;
     }
 }
@@ -219,7 +221,6 @@ void syncState(int core, enum saberState syncState) {
 // and sound accordingly.
 // Called in the Loop to keep the interrupt code as lightweight as possible.
 //
-// TAG TODO - Replace with a light-only state machine, then add a sound-only state machine for the other processor
 
 enum saberState changeBladeState(enum saberState evalState) {
     enum saberState tmpState = evalState;
@@ -229,10 +230,10 @@ enum saberState changeBladeState(enum saberState evalState) {
     }
     syncState(0, tmpState); // Make sure both threads are sync'd.
     Serial.print("changeBladeState: ");
-    Serial.println(evalState);
+    Serial.println(tmpState);
     switch (tmpState) {
-        case off:
-        case isready:  // Both off and isready are really the same thing for now
+        case off:      // 0
+        case isready:  // 3 Both off and isready are really the same thing for now
             // Blade has already gone through powerdown and is now essentially at ready.
             // Shut off button led if it is on.
             digitalWrite(LED_PIN, LOW);
@@ -241,7 +242,7 @@ enum saberState changeBladeState(enum saberState evalState) {
               Blade.show();
             CRITICAL_STOP
             break;
-        case idle:
+        case idle:     // 4
             // Blade was in 'off'.  Enable the button LED
             digitalWrite(LED_PIN, HIGH);
             CRITICAL_START
@@ -250,7 +251,7 @@ enum saberState changeBladeState(enum saberState evalState) {
               delay(BTN_TIMER);
             CRITICAL_STOP
             break;
-        case powerup:
+        case powerup: // 5
             // Extend blade  - pause between pixels for LED_SPEED ms
             CRITICAL_START
               for (int i = 0; i < NUM_LEDS; i++) {
@@ -260,11 +261,12 @@ enum saberState changeBladeState(enum saberState evalState) {
               }
               delay(BTN_TIMER);
             CRITICAL_STOP
-            tmpState = on; // Auto advance
-            tmpState = changeBladeState(tmpState);  // Recursive call
+            //currentState = powerup;
+            nextState = on; // Auto advance
+            tmpState = changeBladeState(nextState);  // Recursive call
             break;
-        case on:
-            
+        case on:  // 6
+            Serial.println("In ChangeState Section for ON");
             break;
         case powerdown:
             CRITICAL_START
@@ -276,8 +278,9 @@ enum saberState changeBladeState(enum saberState evalState) {
               }
               delay(BTN_TIMER);
             CRITICAL_STOP
-            tmpState = off;
-            tmpState = changeBladeState(tmpState);  // Recursive call
+            currentState = powerdown;
+            nextState = off;
+            tmpState = changeBladeState(nextState);  // Recursive call
           
             break;
         case blademove:
@@ -290,6 +293,24 @@ enum saberState changeBladeState(enum saberState evalState) {
     return tmpState;
 }
 
+/*
+ * changeSoundState
+ * 
+ * This function will change the state of the sound based on the blade state.
+ * Currently, only supports the core blade states.  In future, additional states will be added.
+ */
+void changeSoundState(enum saberState evalState) {
+    if (evalState != currentState) {
+        switch(evalState) {
+            // TAG TODO
+            // Here is where we put in the needed sound playing.
+            default:
+                break;   
+        }
+    }
+    syncState(1, procOneState); 
+    return;
+}
 /*
  * This function manages the sound of the lightsaber, playing the new sound upon demand
  * Future enhancement would be to randomize the sound between 1-4 and play that
@@ -516,36 +537,18 @@ void loop() {
  * This loop will manage the sound aspect of the lightsaber.  
  */
 void loop1() {
-    /*
-    if (buttonState != off) {
-        sensors_event_t accel;
-        sensors_event_t gyro;
-        sensors_event_t temp;
-        sox.getEvent(&accel, &gyro, &temp);
-        
 
-        
-        float vector = accel.acceleration.x * accel.acceleration.y * accel.acceleration.z;
-        if ((int)vector/10 != (int)old_vector/10) {
-            //Serial.print("\t\tVector\t");
-            //Serial.println (vector);
-            old_vector = vector;
+   while(1) {
+        // If the priorState is OFF, the only valid options are off and isReady.  Everything else is invalid and will result in a call to POWEROFF
+        changeSoundState(nextState);
+        if (currentState == off) {
+            delay(READY_DELAY);
         }
-        if (vector < 0) {
-            vector = vector * -1;
-        }
-        if (vector > 250) {
-            vector = 250;
-        }
-        int v_int = (int)vector;
-        analogWrite(led, v_int);
-        if(musicPlayer.stopped() && currSoundState != ssoff)
-        {
-            playSound(currSoundState); // Continue playing sound
+        else {
+            delay(POLL_DELAY);
         }
     }
-    */
-    syncState(1, procOneState); 
+    
 }
 /*
 */
